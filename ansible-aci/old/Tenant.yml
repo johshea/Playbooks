@@ -1,0 +1,109 @@
+#!/usr/bin/ansible-playbook
+---
+
+- name: create a tenant
+  hosts:  localhost
+  connection: local
+  gather_facts: no
+
+  vars_files:
+    - '{{ playbook_dir }}/passwords.yml' 
+
+  vars:
+    #  These are default values which can be overridden at run time using -e or --extra-vars
+    tenant_description: "@johshea"                            
+    tenant: johnshea 
+    vrf_name: johnshea                                      
+    tenant_desired_state: present                                            
+    validate_certs: no        
+    desired_state: present                             
+    password: '{{ apic.password }}'                       
+
+  tasks:
+    - name: Create (or delete) tenant
+      aci_tenant:
+        hostname: '{{ apic.hostname }}'
+        username: '{{ apic.username }}'
+        password: '{{ password }}'
+        validate_certs: '{{ validate_certs }}'
+        tenant: '{{ tenant }}'
+        description: '{{ tenant_description }}'
+        state: '{{ tenant_desired_state }}'
+    - name: Create )or delete) vhf
+      aci_vrf:
+        hostname: '{{ apic.hostname }}'
+        username: '{{ apic.username }}'
+        password: '{{ password }}'
+        validate_certs: '{{ validate_certs }}'
+        vrf: '{{ vrf_name }}'
+        tenant: '{{ tenant }}'
+        description: johnshea lab vrf
+        state: '{{ desired_state }}'
+    - name: Add Bridge Domains
+      aci_bd:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        tenant: '{{ tenant }}'
+        bd: '{{ item.servers }}'
+        vrf: '{{ vrf_name }}'
+        arp_flooding: '{{ item.arpflood }}'
+        ip_learning: '{{ item.learning }}'
+        enable_routing: '{{ item.routing }}'
+        state: '{{ desired_state }}'
+      with_items:
+         - { servers: internal, learning: True, arpflood: True, routing: True }
+         - { servers: external, learning: True, arpflood: True, routing: True }
+         - { servers: storage, learning: True, arpflood: False, routing: False }
+    - name: add Bridge Domain Subnets 
+      aci_bd_subnet:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        tenant: '{{ tenant }}'
+        bd: '{{ item.bd_name }}'
+        gateway: '{{ item.gateway }}'
+        mask: '{{ item.mask }}'
+        scope: '{{ item.scope }}'
+        state: '{{ desired_state }}'
+      with_items:
+         - { bd_name: internal, gateway: 172.16.1.1, mask: 24, scope: private }
+         - { bd_name: external, gateway: 172.16.2.1, mask: 24, scope: public }
+         - { bd_name: storage, gateway: 172.16.3.1, mask: 24, scope: private }    
+    - name: add app profile
+      aci_ap:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        tenant: '{{ tenant }}'
+        ap: '{{ item.ap_name }}'
+      with_items:
+         - { ap_name: www }
+         - { ap_name: ftp }
+         - { ap_name: email }
+         - { ap_name: sql }
+         - { ap_name: www_frontend }
+    - name: add app epg Profiles
+      aci_epg:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        tenant: '{{ tenant }}'
+        epg: '{{ item.epg }}'
+        ap: '{{ item.ap_name }}'
+        bd: '{{ item.bd_name }}'
+      with_items:
+         - { epg: www, ap_name: www, bd_name: internal}
+         - { epg: ftp, ap_name: ftp, bd_name: internal }
+         - { epg: email, ap_name: email, bd_name: internal }
+         - { epg: sql, ap_name: sql, bd_name: internal }
+         - { epg: www_frontend, ap_name: www_frontend, bd_name: external }
+        
+      
+      
+
+        

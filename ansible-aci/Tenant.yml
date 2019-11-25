@@ -1,0 +1,350 @@
+#!/usr/bin/ansible-playbook
+---
+
+- name: create a tenant
+  hosts:  localhost
+  connection: local
+  gather_facts: no
+
+  vars_files:
+    - '{{ playbook_dir }}/passwords.yml' 
+
+  vars:
+    #  These are default values which can be overridden at run time using -e or --extra-vars
+    tenant_description: "@johshea"                            
+    tenant: johnshea 
+    vrf_name: johnshea                                      
+    tenant_desired_state: present                                            
+    validate_certs: no        
+    desired_state: present                             
+    password: '{{ apic.password }}'                       
+
+  tasks:
+    - name: Create (or delete) tenant
+      aci_tenant:
+        hostname: '{{ apic.hostname }}'
+        username: '{{ apic.username }}'
+        password: '{{ password }}'
+        validate_certs: '{{ validate_certs }}'
+        tenant: '{{ tenant }}'
+        description: '{{ tenant_description }}'
+        state: '{{ tenant_desired_state }}'
+    - name: Create )or delete) vhf
+      aci_vrf:
+        hostname: '{{ apic.hostname }}'
+        username: '{{ apic.username }}'
+        password: '{{ password }}'
+        validate_certs: '{{ validate_certs }}'
+        vrf: '{{ vrf_name }}'
+        tenant: '{{ tenant }}'
+        description: johnshea lab vrf
+        state: '{{ desired_state }}'
+    - name: Add Bridge Domains
+      aci_bd:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        tenant: '{{ tenant }}'
+        bd: '{{ item.servers }}'
+        vrf: '{{ vrf_name }}'
+        arp_flooding: '{{ item.arpflood }}'
+        ip_learning: '{{ item.learning }}'
+        enable_routing: '{{ item.routing }}'
+        state: '{{ desired_state }}'
+      with_items:
+         - { servers: internal, learning: True, arpflood: True, routing: True }
+         - { servers: external, learning: True, arpflood: True, routing: True }
+         - { servers: storage, learning: True, arpflood: False, routing: False }
+    - name: add Bridge Domain Subnets 
+      aci_bd_subnet:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        tenant: '{{ tenant }}'
+        bd: '{{ item.bd_name }}'
+        gateway: '{{ item.gateway }}'
+        mask: '{{ item.mask }}'
+        scope: '{{ item.scope }}'
+        state: '{{ desired_state }}'
+      with_items:
+         - { bd_name: internal, gateway: 172.16.1.1, mask: 24, scope: private }
+         - { bd_name: external, gateway: 172.16.2.1, mask: 24, scope: public }
+         - { bd_name: storage, gateway: 172.16.3.1, mask: 24, scope: private }    
+    - name: add app profile
+      aci_ap:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        tenant: '{{ tenant }}'
+        ap: '{{ item.ap_name }}'
+      with_items:
+         - { ap_name: app }
+         - { ap_name: ftp }
+         - { ap_name: email }
+         - { ap_name: sql }
+         - { ap_name: www }
+    - name: add app epg Profiles
+      aci_epg:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        tenant: '{{ tenant }}'
+        epg: '{{ item.epg }}'
+        ap: '{{ item.ap_name }}'
+        bd: '{{ item.bd_name }}'
+      with_items:
+         - { epg: www, ap_name: app, bd_name: internal}
+         - { epg: ftp, ap_name: ftp, bd_name: internal }
+         - { epg: email, ap_name: email, bd_name: internal }
+         - { epg: sql, ap_name: sql, bd_name: internal }
+         - { epg: www, ap_name: www, bd_name: external }
+    - name: add a new physical domain
+      aci_domain:
+         hostname: "{{ apic.hostname }}"
+         username: "{{ apic.username }}"
+         password: "{{ password }}"
+         validate_certs: '{{ validate_certs }}'
+         domain: phys_dom
+         domain_type: phys
+         state: '{{ desired_state }}'
+    - name: add a new virtual domain
+      aci_domain:
+         hostname: "{{ apic.hostname }}"
+         username: "{{ apic.username }}"
+         password: "{{ password }}"
+         validate_certs: '{{ validate_certs }}'
+         domain: vmw_domain
+         domain_type: vmm
+         vm_provider: vmware
+         vswitch: dvs
+         state: '{{ desired_state }}'
+    - name: add a static vlan pool
+      aci_vlan_pool:
+         hostname: "{{ apic.hostname }}"
+         username: "{{ apic.username }}"
+         password: "{{ password }}"
+         validate_certs: '{{ validate_certs }}'
+         pool: '{{ item.pool }}'
+         pool_allocation_mode: '{{ item.mode }}'
+         description: Production VLANs
+         state: '{{ desired_state }}'
+      with_items:
+         - { pool: phys_pool, mode: static, }
+         - { pool: vmw_pool, domain_type: vmm, mode: dynamic }
+    - name: Add a new VLAN encap block
+      aci_vlan_pool_encap_block:
+         hostname: "{{ apic.hostname }}"
+         username: "{{ apic.username }}"
+         password: "{{ password }}"
+         validate_certs: '{{ validate_certs }}'
+         pool: '{{ item.pool_name }}'
+         pool_allocation_mode: '{{ item.pool_allocation_mode}}'
+         block_name: '{{ item.block_name }}'
+         block_start: '{{ item.start }}'
+         block_end: '{{ item.end }}'
+         state: '{{ desired_state }}'
+      with_items:
+          - { pool_name: phys_pool, pool_allocation_mode: static, block_name: pys_block, start: 200, end: 500 }
+          - { pool_name: vmw_pool, pool_allocation_mode: dynamic, block_name: vmw_block, start: 2000, end: 2500 }
+    - name: Add a new vlan range
+      aci_encap_pool_range:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        pool: '{{ item.pool }}'
+        pool_type: '{{ item.type }}'
+        pool_allocation_mode: '{{ item.pool_allocation_mode}}'
+        range_name: '{{ item.range_name }}'
+        range_start: '{{ item.start }}'
+        range_end: '{{ item.end }}'
+        state: '{{ desired_state }}'
+      with_items:
+          - { pool: phys_pool, pool_allocation_mode: static, range_name: phys_pool, type: vlan, start: 200, end: 500 }
+          - { pool: vmw_pool, pool_allocation_mode: dynamic, range_name: vmw_pool, type: vlan, start: 2000, end: 2500 }
+
+    - name: Bind a Physical domain to VLAN pool
+      aci_domain_to_vlan_pool:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        domain: phys_dom
+        domain_type: phys
+        pool: phys_pool
+        pool_allocation_mode: static
+        state: '{{ desired_state }}'
+  
+    - name: Bind a Visual domain to VLAN pool
+      aci_domain_to_vlan_pool:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        domain: vmm_dom
+        domain_type: vmm
+        pool: vmw_pool
+        vm_provider: vmware
+        pool_allocation_mode: dynamic
+        state: '{{ desired_state }}'
+
+    - name: add an AEP
+      aci_aep:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        aep: '{{ item.aep }}'
+        state: '{{ desired_state }}'
+      with_items:
+         - {aep: AEP-1}
+
+    
+    - name: create a leaf profile
+      aci_switch_policy_leaf_profile:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        leaf_profile: '{{ item.leaf_profile }}'
+        description: '{{ item.description }}'
+        state: '{{ desired_state }}'
+      with_items:
+         - {leaf_profile: Profile-1, description: leaf profile 1 }
+         - {leaf_profile: Profile-2, description: leaf profile 2 }
+      
+    - name: Deploy Static Path binding for given EPG
+      aci_static_binding_to_epg:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        tenant: '{{ tenant }}'
+        ap: '{{ item.ap }}'
+        epg: '{{ item.epg }}'
+        encap_id: '{{ item.encap_id }}'
+        deploy_immediacy: '{{ item.immeadiacy }}'
+        interface_mode: '{{ item.interface_mode }}'
+        interface_type: '{{ item.interface_type }}'
+        pod_id: '{{ item.pod_id }}'
+        leafs: '{{ item.leafs }}'
+        interface: '{{ item.interface }}'
+        state: '{{ desired_state }}'
+      with_items:
+         - {epg: app, ap: app, encap_id: 222, immeadiacy: lazy, interface_mode: access, interface_type: switch_port, pod_id: 1, leafs: 101, interface: 1/10 }
+         - {epg: sql, ap: sql, encap_id: 223, immeadiacy: lazy, interface_mode: access, interface_type: switch_port, pod_id: 1, leafs: 101, interface: 1/11 }
+         - {epg: app, ap: app, encap_id: 222, immeadiacy: lazy, interface_mode: access, interface_type: switch_port, pod_id: 1, leafs: 101, interface: 2/10 }
+         - {epg: sql, ap: sql, encap_id: 223, immeadiacy: lazy, interface_mode: access, interface_type: switch_port, pod_id: 1, leafs: 101, interface: 2/11 }
+         - {epg: app, ap: app, encap_id: 221, immeadiacy: lazy, interface_mode: access, interface_type: switch_port, pod_id: 1, leafs: 101, interface: 1/12 }
+         - {epg: www, ap: www, encap_id: 221, immeadiacy: lazy, interface_mode: access, interface_type: switch_port, pod_id: 1, leafs: 101, interface: 2/12 }
+
+    - name: create LLDP Policy
+      aci_interface_policy_lldp:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        validate_certs: '{{ validate_certs }}'
+        lldp_policy: '{{ item.lldp_policy }}'
+        description: '{{ item.description }}'
+        receive_state: '{{ item.receive_state }}'
+        transmit_state: '{{ item.transmit_state }}'
+        state: '{{ desired_state }}'
+      with_items:
+         - { lldp_policy: lldp_enabled, description: bidirectional_lldp, receive_state: True, transmit_state: True }
+         - { lldp_policy: lldp_disabled, description: lldp_off, receive_state: False, transmit_state: False }
+         - { lldp_policy: lldp_enable_tx, description: lldp_enabled_tx, recieve_state: False, transmit_state: True }
+         - { lldp_policy: lldp_enable_rx, description: lldp_enabled_rx, recieve_state: True, transmit_state: False }
+    
+    - name: create a contract
+      aci_contract:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        contract: '{{ item.contract }}'
+        description: '{{ item.descr }}'
+        tenant: '{{ tenant }}'
+        scope: '{{ item.scope }}'
+        state: "{{ desired_state }}"
+     with_items:
+        - { contract: web_app, descr: www-to-app, scope: application-profile }
+
+
+
+    - name: create a top level filter
+      aci_filter:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        state: "{{ desired_state }}"
+        filter: web_filter
+        description: Filter for web protocols
+        tenant: '{{ tenant }}'
+        state: "{{ desired_state }}"
+
+    - name: create a filter entry
+      aci_filter_entry:
+        hostname: "{{ apic.hostname }}"
+        username: "{{ apic.username }}"
+        password: "{{ password }}"
+        state: "{{ desired_state }}"
+        entry: "{{ item.entry }}"
+        tenant: "{{ tenant }}"
+        ether_name: "{{  item.ether_name }}"
+        ip_protocol: "{{ ip_protocol }}"
+        dst_port_start: "{{ item.dst_port_start }}"
+        dst_port_stop: "{{ item.dst_port_stop }}"
+        filter: "{{ item.filter }}"
+        descr: "{{ item.descr }}"
+     with_items:
+        - { entry: www_process_app, ether_name: ip, ip_protocol: tcp, dst_port_start: 45000, dst_port_stop: 45010, filter: web_filter, descr: sample Filter 1 }
+        - { entry: www_process_app, ether_name: ip, ip_protocol: tcp, dst_port_start: 45011, dst_port_stop: 45020, filter: web_filter, descr: sample Filter 1 }
+
+   - name: create a contract
+     aci_contract:
+       hostname: "{{ apic.hostname }}"
+       username: "{{ apic.username }}"
+       password: "{{ password }}"
+       state: "{{ desired_state }}"
+       contract: '{{ item.contract }}'
+       description: '{{ item.descr }}'
+       tenant: '{{ tenant }}'
+       scope: '{{ item.scope }}'
+     
+       state: "{{ desired_state }}"
+     with_items:
+        - { contract: web_app, descr: www-to-app, scope: application-profile }
+
+   - name: Add a new contract subject
+     aci_contract_subject:
+       hostname: "{{ apic.hostname }}"
+       username: "{{ apic.username }}"
+       password: "{{ password }}"
+       state: "{{ desired_state }}"
+       tenant: '{{ tenant }}'
+       contract: '{{ contract }}'
+       subject: '{{ item.subject }}'
+       description: '{{ item.description }}'
+       reverse_filter: '{{ item.reverse_filter }}'
+       dscp: '{{ item.dscp }}'
+     with_items:
+        - { contract: web_app, subject: default, description: web_app_subject, reverse_filter: yes }
+
+   - aci_subject_filter_binding:
+       hostname: "{{ apic.hostname }}"
+       username: "{{ apic.username }}"
+       password: "{{ password }}"
+       state: "{{ desired_state }}"    
+       tenant: '{{ tenant }}'
+       contract: '{{ item.contract }}'
+       subject: '{{ item.subject }}'
+       filter: '{{ item.filter }}'
+       log: '{{ log }}'
+      with_items:
+        - { contract: web_app, subject: default, filter: web_filter }
+
+    
+       

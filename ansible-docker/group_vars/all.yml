@@ -1,0 +1,2 @@
+ansible_ssh_pass: docker
+ansible_become_pass: docker
